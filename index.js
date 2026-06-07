@@ -148,8 +148,17 @@ function connectGateway() {
           d.author?.id === DISBOARD_BOT_ID &&
           d.channel_id === BUMP_CHANNEL_ID
         ) {
-          const desc = d.embeds?.[0]?.description ?? "";
-          if (desc.toLowerCase().includes("bump") || desc.includes(":thumbsup:")) {
+          const messageText = getMessageText(d);
+          const cooldownMinutes = getDisboardCooldownMinutes(messageText);
+
+          if (cooldownMinutes !== null) {
+            const retryDelay = Math.max(cooldownMinutes, 1) * 60 * 1000;
+            console.log(`[Auto-Bump] Disboard demande d'attendre encore ${cooldownMinutes} minute(s).`);
+            scheduleBump(retryDelay, true);
+            return;
+          }
+
+          if (isDisboardSuccess(messageText)) {
             console.log(`[Auto-Bump]  Bump confirmé par Disboard. Prochain bump dans 2h.`);
             lastBumpTime = Date.now();
             scheduleBump(BUMP_COOLDOWN_MS, true);
@@ -179,6 +188,29 @@ function reconnectGateway() {
   clearInterval(heartbeatInterval);
   ws?.terminate();
   setTimeout(connectGateway, 1000);
+}
+
+function getMessageText(message) {
+  const content = message.content ?? "";
+  const embedTitle = message.embeds?.[0]?.title ?? "";
+  const embedDescription = message.embeds?.[0]?.description ?? "";
+  const embedFields = message.embeds?.[0]?.fields?.map((field) => `${field.name} ${field.value}`).join(" ") ?? "";
+  return `${content} ${embedTitle} ${embedDescription} ${embedFields}`;
+}
+
+function getDisboardCooldownMinutes(text) {
+  const match = text.match(/attends encore\s+(\d+)\s+minutes?/i);
+  return match ? Number(match[1]) : null;
+}
+
+function isDisboardSuccess(text) {
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes("bump effectué") ||
+    normalized.includes("bump done") ||
+    normalized.includes("serveur bumpé") ||
+    normalized.includes("server bumped")
+  );
 }
 
 async function bump() {
