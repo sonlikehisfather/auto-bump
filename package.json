@@ -1,0 +1,13 @@
+{
+  "name": "auto-bump",
+  "version": "1.0.0",
+  "description": "Bot Discord qui bump automatiquement le serveur via Disboard toutes les 2h",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ws": "^8.18.0"
+  }
+}
