@@ -6,10 +6,16 @@ const BUMP_CHANNEL_ID = process.env.BUMP_CHANNEL_ID;
 
 const DISBOARD_BOT_ID = "302050872383242240";
 const BUMP_COOLDOWN_MS = 2 * 60 * 60 * 1000; 
+const MIN_RETRY_DELAY_MS = 30 * 60 * 1000;
+const MAX_RETRY_DELAY_MS = 2 * 60 * 60 * 1000;
 const DISCORD_API = "discord.com";
 
 let lastBumpTime = 0;
+let lastAttemptTime = 0;
 let bumpTimer = null;
+let nextBumpAt = 0;
+let isBumping = false;
+let failedAttempts = 0;
 
 function apiRequest(method, path, body = null) {
   return new Promise((resolve, reject) => {
@@ -94,7 +100,7 @@ async function sendBumpInteraction(guildId, bumpCommand) {
   };
 
   const res = await apiRequest("POST", "/interactions", body);
-  return res.status === 204 || res.status === 200;
+  return res;
 }
 
 const WebSocket = require("ws");
@@ -136,7 +142,7 @@ function connectGateway() {
       if (t === "READY") {
         console.log(`[Auto-Bump] Connecté en tant que ${d.user.username}#${d.user.discriminator}`);
         sessionId = d.session_id;
-        scheduleBump(0); 
+        scheduleBump(60 * 1000); 
       }
 
       if (t === "MESSAGE_CREATE") {
@@ -148,7 +154,7 @@ function connectGateway() {
           if (desc.toLowerCase().includes("bump") || desc.includes(":thumbsup:")) {
             console.log(`[Auto-Bump]  Bump confirmé par Disboard. Prochain bump dans 2h.`);
             lastBumpTime = Date.now();
-            clearTimeout(bumpTimer);
+            failedAttempts = 0;
             scheduleBump(BUMP_COOLDOWN_MS);
           }
         }
@@ -179,6 +185,23 @@ function reconnectGateway() {
 }
 
 async function bump() {
+  if (isBumping) {
+    console.warn("[Auto-Bump] Tentative ignorée : un bump est déjà en cours.");
+    return;
+  }
+
+  const now = Date.now();
+  const timeSinceLastAttempt = now - lastAttemptTime;
+  if (lastAttemptTime && timeSinceLastAttempt < MIN_RETRY_DELAY_MS) {
+    const remaining = MIN_RETRY_DELAY_MS - timeSinceLastAttempt;
+    console.warn("[Auto-Bump] Tentative trop proche de la précédente. Reprogrammation.");
+    scheduleBump(remaining);
+    return;
+  }
+
+  isBumping = true;
+  lastAttemptTime = now;
+
   try {
     console.log(`[Auto-Bump] Tentative de bump... (${new Date().toLocaleString("fr-FR")})`);
 
@@ -188,32 +211,57 @@ async function bump() {
     const bumpCommand = await getBumpCommand(guildId);
     if (!bumpCommand) {
       console.error("[Auto-Bump] ❌ Commande /bump introuvable. Disboard est-il sur le serveur ?");
-      scheduleBump(BUMP_COOLDOWN_MS);
+      failedAttempts += 1;
+      scheduleBump(getRetryDelay());
       return;
     }
 
-    const ok = await sendBumpInteraction(guildId, bumpCommand);
-    if (ok) {
+    const res = await sendBumpInteraction(guildId, bumpCommand);
+    if (res.status === 204 || res.status === 200) {
       console.log(`[Auto-Bump]  /bump envoyé avec succès.`);
       lastBumpTime = Date.now();
+      failedAttempts = 0;
       scheduleBump(BUMP_COOLDOWN_MS);
     } else {
-      console.error("[Auto-Bump]  Échec de l'envoi du bump. Retry dans 5 min.");
-      scheduleBump(5 * 60 * 1000);
+      failedAttempts += 1;
+      console.error(`[Auto-Bump]  Échec de l'envoi du bump. Status: ${res.status}`);
+      if (res.body?.message) console.error(`[Auto-Bump] Discord: ${res.body.message}`);
+      scheduleBump(getRetryDelay());
     }
   } catch (err) {
+    failedAttempts += 1;
     console.error("[Auto-Bump] Erreur :", err.message);
-    scheduleBump(5 * 60 * 1000);
+    scheduleBump(getRetryDelay());
+  } finally {
+    isBumping = false;
   }
 }
 
+function getRetryDelay() {
+  const delay = MIN_RETRY_DELAY_MS * failedAttempts;
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
+}
+
 function scheduleBump(delayMs) {
-  clearTimeout(bumpTimer);
-  const minutes = Math.round(delayMs / 60000);
-  if (minutes > 0) {
-    console.log(`[Auto-Bump] Prochain bump dans ${minutes} minute(s).`);
+  const safeDelay = Math.max(delayMs, 60 * 1000);
+  const scheduledAt = Date.now() + safeDelay;
+
+  if (bumpTimer && nextBumpAt && nextBumpAt <= scheduledAt) {
+    const currentMinutes = Math.ceil((nextBumpAt - Date.now()) / 60000);
+    console.log(`[Auto-Bump] Timer déjà actif. Prochain bump dans ${currentMinutes} minute(s).`);
+    return;
   }
-  bumpTimer = setTimeout(bump, delayMs);
+
+  clearTimeout(bumpTimer);
+  nextBumpAt = scheduledAt;
+
+  const minutes = Math.ceil(safeDelay / 60000);
+  console.log(`[Auto-Bump] Prochain bump dans ${minutes} minute(s).`);
+  bumpTimer = setTimeout(() => {
+    bumpTimer = null;
+    nextBumpAt = 0;
+    bump();
+  }, safeDelay);
 }
 
 try {
