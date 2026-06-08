@@ -14,6 +14,7 @@ let lastAttemptTime = 0;
 let bumpTimer = null;
 let nextBumpAt = 0;
 let isBumping = false;
+let isReconnecting = false;
 
 function apiRequest(method, path, body = null) {
   return new Promise((resolve, reject) => {
@@ -211,9 +212,16 @@ function connectGateway() {
 
     if (op === 0) {
       if (t === "READY") {
+        isReconnecting = false;
         console.log(`[Auto-Bump] Connecté en tant que ${d.user.username}#${d.user.discriminator}`);
         sessionId = d.session_id;
-        scheduleBump(60 * 1000); 
+
+        if (bumpTimer && nextBumpAt > Date.now()) {
+          const remainingMin = Math.ceil((nextBumpAt - Date.now()) / 60000);
+          console.log(`[Auto-Bump] Gateway reconnecté. Timer conservé : prochain bump dans ${remainingMin} minute(s).`);
+        } else {
+          scheduleBump(60 * 1000);
+        }
       }
 
       if (t === "MESSAGE_CREATE") {
@@ -256,14 +264,19 @@ function connectGateway() {
 
   ws.on("close", () => {
     clearInterval(heartbeatInterval);
-    console.warn("[Gateway] Déconnecté. Reconnexion dans 5s...");
-    setTimeout(connectGateway, 5000);
+    if (!isReconnecting) {
+      isReconnecting = true;
+      console.warn("[Gateway] Déconnecté. Reconnexion dans 5s...");
+      setTimeout(connectGateway, 5000);
+    }
   });
 
   ws.on("error", (err) => console.error("[Gateway] Erreur :", err.message));
 }
 
 function reconnectGateway() {
+  if (isReconnecting) return;
+  isReconnecting = true;
   clearInterval(heartbeatInterval);
   ws?.terminate();
   setTimeout(connectGateway, 1000);
