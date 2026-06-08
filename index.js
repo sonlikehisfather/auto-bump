@@ -221,21 +221,27 @@ function connectGateway() {
           d.author?.id === DISBOARD_BOT_ID &&
           d.channel_id === BUMP_CHANNEL_ID
         ) {
-          const messageText = getMessageText(d);
-          const cooldownMinutes = getDisboardCooldownMinutes(messageText);
+          handleDisboardMessage(d);
+        }
+      }
 
-          if (cooldownMinutes !== null) {
-            const retryDelay = Math.max(cooldownMinutes, 1) * 60 * 1000;
-            console.log(`[Auto-Bump] Disboard demande d'attendre encore ${cooldownMinutes} minute(s).`);
-            scheduleBump(retryDelay, true);
-            return;
-          }
+      if (t === "INTERACTION_CREATE") {
+        if (
+          d.application_id === DISBOARD_BOT_ID &&
+          d.channel_id === BUMP_CHANNEL_ID &&
+          d.data?.name === "bump"
+        ) {
+          const msg = d.message ?? d.data?.resolved ?? null;
+          if (msg) handleDisboardMessage(msg);
+        }
+      }
 
-          if (isDisboardSuccess(messageText)) {
-            console.log(`[Auto-Bump]  Bump confirmé par Disboard. Prochain bump dans 2h.`);
-            lastBumpTime = Date.now();
-            scheduleBump(BUMP_COOLDOWN_MS, true);
-          }
+      if (t === "MESSAGE_UPDATE") {
+        if (
+          d.author?.id === DISBOARD_BOT_ID &&
+          d.channel_id === BUMP_CHANNEL_ID
+        ) {
+          handleDisboardMessage(d);
         }
       }
     }
@@ -264,26 +270,99 @@ function reconnectGateway() {
 }
 
 function getMessageText(message) {
-  const content = message.content ?? "";
-  const embedTitle = message.embeds?.[0]?.title ?? "";
-  const embedDescription = message.embeds?.[0]?.description ?? "";
-  const embedFields = message.embeds?.[0]?.fields?.map((field) => `${field.name} ${field.value}`).join(" ") ?? "";
-  return `${content} ${embedTitle} ${embedDescription} ${embedFields}`;
+  const parts = [
+    message.content ?? "",
+    message.embeds?.[0]?.title ?? "",
+    message.embeds?.[0]?.description ?? "",
+    ...(message.embeds?.[0]?.fields?.map((f) => `${f.name} ${f.value}`) ?? []),
+  ];
+  return parts.join(" ");
 }
 
-function getDisboardCooldownMinutes(text) {
-  const match = text.match(/attends encore\s+(\d+)\s+minutes?/i);
-  return match ? Number(match[1]) : null;
+function parseCooldownMs(text) {
+  const t = text.toLowerCase();
+  let totalMs = 0;
+  let found = false;
+
+  // "X heure(s)" ou "X hour(s)"
+  const hoursMatch = t.match(/(\d+)\s*(?:heures?|hours?)/);
+  if (hoursMatch) {
+    totalMs += Number(hoursMatch[1]) * 60 * 60 * 1000;
+    found = true;
+  }
+
+  // "X minute(s)"
+  const minutesMatch = t.match(/(\d+)\s*minute?s?/i);
+  if (minutesMatch) {
+    totalMs += Number(minutesMatch[1]) * 60 * 1000;
+    found = true;
+  }
+
+  // "X seconde(s)" ou "X second(s)"
+  const secondsMatch = t.match(/(\d+)\s*(?:secondes?|seconds?)/);
+  if (secondsMatch) {
+    totalMs += Number(secondsMatch[1]) * 1000;
+    found = true;
+  }
+
+  // Timestamp Discord <t:UNIX:R> dans le texte
+  const timestampMatch = text.match(/<t:(\d+)(?::[a-zA-Z])?>/);
+  if (timestampMatch) {
+    const targetMs = Number(timestampMatch[1]) * 1000;
+    const remaining = targetMs - Date.now();
+    if (remaining > 0) return remaining;
+    found = false;
+  }
+
+  return found && totalMs > 0 ? totalMs : null;
+}
+
+function isCooldownMessage(text) {
+  const t = text.toLowerCase();
+  return (
+    t.includes("attends encore") ||
+    t.includes("wait") ||
+    t.includes("please wait") ||
+    t.includes("cooldown") ||
+    t.includes("bumpé récemment") ||
+    t.includes("bumped recently")
+  );
 }
 
 function isDisboardSuccess(text) {
-  const normalized = text.toLowerCase();
+  const t = text.toLowerCase();
   return (
-    normalized.includes("bump effectué") ||
-    normalized.includes("bump done") ||
-    normalized.includes("serveur bumpé") ||
-    normalized.includes("server bumped")
+    t.includes("bump effectué") ||
+    t.includes("bump done") ||
+    t.includes("serveur bumpé") ||
+    t.includes("server bumped") ||
+    t.includes("bumped your server") ||
+    t.includes(":thumbsup:")
   );
+}
+
+function handleDisboardMessage(messageData) {
+  const text = getMessageText(messageData);
+  const receivedAt = Date.now();
+
+  if (isCooldownMessage(text)) {
+    const cooldownMs = parseCooldownMs(text);
+    if (cooldownMs !== null) {
+      const minutes = Math.ceil(cooldownMs / 60000);
+      console.log(`[Auto-Bump] Cooldown détecté : ${minutes} minute(s) restante(s). Timer ajusté précisément.`);
+      scheduleBump(cooldownMs, true);
+    } else {
+      console.warn(`[Auto-Bump] Message de cooldown reçu mais durée non parsée : "${text.trim().slice(0, 120)}"`);
+      scheduleBump(RETRY_DELAY_MS, true);
+    }
+    return;
+  }
+
+  if (isDisboardSuccess(text)) {
+    console.log(`[Auto-Bump] Bump confirmé par Disboard à ${new Date(receivedAt).toLocaleTimeString("fr-FR")}. Prochain bump dans 2h.`);
+    lastBumpTime = receivedAt;
+    scheduleBump(BUMP_COOLDOWN_MS, true);
+  }
 }
 
 async function bump() {
