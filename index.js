@@ -9,6 +9,34 @@ const BUMP_COOLDOWN_MS = 2 * 60 * 60 * 1000;
 const RETRY_DELAY_MS = 10 * 60 * 1000;
 const DISCORD_API = "discord.com";
 
+const CLIENT_BUILD_NUMBER = 336678;
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+const SUPER_PROPERTIES = Buffer.from(JSON.stringify({
+  os: "Windows",
+  browser: "Chrome",
+  device: "",
+  system_locale: "fr-FR",
+  browser_user_agent: UA,
+  browser_version: "125.0.0.0",
+  os_version: "10",
+  referrer: "",
+  referring_domain: "",
+  referrer_current: "",
+  referring_domain_current: "",
+  release_channel: "stable",
+  client_build_number: CLIENT_BUILD_NUMBER,
+  client_event_source: null,
+})).toString("base64");
+
+function jitter(base, rangeMs = 2500) {
+  return base + Math.floor(Math.random() * rangeMs);
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 let lastBumpTime = 0;
 let lastAttemptTime = 0;
 let bumpTimer = null;
@@ -16,7 +44,7 @@ let nextBumpAt = 0;
 let isBumping = false;
 let isReconnecting = false;
 
-function apiRequest(method, path, body = null) {
+function apiRequest(method, path, body = null, extraHeaders = null) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const options = {
@@ -26,28 +54,16 @@ function apiRequest(method, path, body = null) {
       headers: {
         Authorization: USER_TOKEN,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "User-Agent": UA,
         "X-Discord-Locale": "fr",
         "X-Discord-Timezone": "Europe/Paris",
-        "X-Super-Properties": Buffer.from(JSON.stringify({
-          os: "Windows",
-          browser: "Chrome",
-          device: "",
-          system_locale: "fr-FR",
-          browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-          browser_version: "125.0.0.0",
-          os_version: "10",
-          referrer: "",
-          referring_domain: "",
-          referrer_current: "",
-          referring_domain_current: "",
-          release_channel: "stable",
-          client_build_number: 306073,
-          client_event_source: null,
-        })).toString("base64"),
+        "X-Super-Properties": SUPER_PROPERTIES,
         "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me",
+        "Referer": `https://discord.com/channels/@me`,
+        "Accept": "*/*",
+        "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
         ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
+        ...(extraHeaders ?? {}),
       },
     };
 
@@ -98,13 +114,13 @@ async function getBumpCommand(guildId) {
 }
 
 async function sendBumpInteraction(guildId, bumpCommand) {
-  const nonce = String(Date.now());
+  const nonce = generateSnowflake();
   const body = {
     type: 2,
     application_id: DISBOARD_BOT_ID,
     guild_id: guildId,
     channel_id: BUMP_CHANNEL_ID,
-    session_id: nonce,
+    session_id: sessionId,
     data: {
       version: bumpCommand.version,
       id: bumpCommand.id,
@@ -118,8 +134,27 @@ async function sendBumpInteraction(guildId, bumpCommand) {
     analytics_location: "slash_ui",
   };
 
-  const res = await apiRequest("POST", "/interactions", body);
+  const contextProps = Buffer.from(JSON.stringify({
+    location: "slash_ui",
+    location_guild_id: guildId,
+    location_channel_id: BUMP_CHANNEL_ID,
+    location_channel_type: 0,
+  })).toString("base64");
+
+  await sleep(jitter(300, 700));
+
+  const res = await apiRequest("POST", "/interactions", body, {
+    "X-Context-Properties": contextProps,
+    "Referer": `https://discord.com/channels/${guildId}/${BUMP_CHANNEL_ID}`,
+  });
   return res;
+}
+
+function generateSnowflake() {
+  const DISCORD_EPOCH = 1420070400000n;
+  const ts = BigInt(Date.now()) - DISCORD_EPOCH;
+  const rand = BigInt(Math.floor(Math.random() * 0xfff));
+  return String((ts << 22n) | (rand & 0x3FFFFn));
 }
 
 const WebSocket = require("ws");
@@ -128,27 +163,10 @@ let heartbeatInterval = null;
 let sessionId = null;
 let sequence = null;
 
-const SUPER_PROPERTIES = Buffer.from(JSON.stringify({
-  os: "Windows",
-  browser: "Chrome",
-  device: "",
-  system_locale: "fr-FR",
-  browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-  browser_version: "125.0.0.0",
-  os_version: "10",
-  referrer: "",
-  referring_domain: "",
-  referrer_current: "",
-  referring_domain_current: "",
-  release_channel: "stable",
-  client_build_number: 306073,
-  client_event_source: null,
-})).toString("base64");
-
 function connectGateway() {
   ws = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json", {
     headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      "User-Agent": UA,
       "Origin": "https://discord.com",
     },
   });
@@ -165,7 +183,9 @@ function connectGateway() {
       const interval = d.heartbeat_interval;
       heartbeatInterval = setInterval(() => {
         ws.send(JSON.stringify({ op: 1, d: sequence }));
-      }, interval);
+      }, jitter(interval, 1000));
+
+      await sleep(jitter(500, 1500));
 
       ws.send(
         JSON.stringify({
@@ -186,7 +206,7 @@ function connectGateway() {
               referrer_current: "",
               referring_domain_current: "",
               release_channel: "stable",
-              client_build_number: 306073,
+              client_build_number: CLIENT_BUILD_NUMBER,
               client_event_source: null,
             },
             presence: {
