@@ -25,7 +25,27 @@ function apiRequest(method, path, body = null) {
       headers: {
         Authorization: USER_TOKEN,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "X-Discord-Locale": "fr",
+        "X-Discord-Timezone": "Europe/Paris",
+        "X-Super-Properties": Buffer.from(JSON.stringify({
+          os: "Windows",
+          browser: "Chrome",
+          device: "",
+          system_locale: "fr-FR",
+          browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          browser_version: "125.0.0.0",
+          os_version: "10",
+          referrer: "",
+          referring_domain: "",
+          referrer_current: "",
+          referring_domain_current: "",
+          release_channel: "stable",
+          client_build_number: 306073,
+          client_event_source: null,
+        })).toString("base64"),
+        "Origin": "https://discord.com",
+        "Referer": "https://discord.com/channels/@me",
         ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
       },
     };
@@ -107,8 +127,30 @@ let heartbeatInterval = null;
 let sessionId = null;
 let sequence = null;
 
+const SUPER_PROPERTIES = Buffer.from(JSON.stringify({
+  os: "Windows",
+  browser: "Chrome",
+  device: "",
+  system_locale: "fr-FR",
+  browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+  browser_version: "125.0.0.0",
+  os_version: "10",
+  referrer: "",
+  referring_domain: "",
+  referrer_current: "",
+  referring_domain_current: "",
+  release_channel: "stable",
+  client_build_number: 306073,
+  client_event_source: null,
+})).toString("base64");
+
 function connectGateway() {
-  ws = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
+  ws = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json", {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      "Origin": "https://discord.com",
+    },
+  });
 
   ws.on("open", () => console.log("[Gateway] Connecté au gateway Discord."));
 
@@ -129,8 +171,39 @@ function connectGateway() {
           op: 2,
           d: {
             token: USER_TOKEN,
-            properties: { os: "windows", browser: "chrome", device: "" },
-            intents: (1 << 0) | (1 << 9) | (1 << 12), // GUILDS, GUILD_MESSAGES, MESSAGE_CONTENT
+            capabilities: 16381,
+            properties: {
+              os: "Windows",
+              browser: "Chrome",
+              device: "",
+              system_locale: "fr-FR",
+              browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+              browser_version: "125.0.0.0",
+              os_version: "10",
+              referrer: "",
+              referring_domain: "",
+              referrer_current: "",
+              referring_domain_current: "",
+              release_channel: "stable",
+              client_build_number: 306073,
+              client_event_source: null,
+            },
+            presence: {
+              status: "online",
+              since: 0,
+              activities: [],
+              afk: false,
+            },
+            compress: false,
+            client_state: {
+              guild_versions: {},
+              highest_last_message_id: "0",
+              read_state_version: 0,
+              user_guild_settings_version: -1,
+              user_settings_version: -1,
+              private_channels_version: "0",
+              api_code_version: 0,
+            },
           },
         })
       );
