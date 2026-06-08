@@ -10,22 +10,21 @@ const RETRY_DELAY_MS = 10 * 60 * 1000;
 const DISCORD_API = "discord.com";
 
 const CLIENT_BUILD_NUMBER = 336678;
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9163 Chrome/124.0.6367.243 Electron/30.2.0 Safari/537.36";
 
 const SUPER_PROPERTIES = Buffer.from(JSON.stringify({
   os: "Windows",
-  browser: "Chrome",
-  device: "",
+  browser: "Discord Client",
+  release_channel: "stable",
+  client_version: "1.0.9163",
+  os_version: "10.0.26100",
+  os_arch: "x64",
+  app_arch: "x64",
   system_locale: "fr-FR",
   browser_user_agent: UA,
-  browser_version: "125.0.0.0",
-  os_version: "10",
-  referrer: "",
-  referring_domain: "",
-  referrer_current: "",
-  referring_domain_current: "",
-  release_channel: "stable",
+  browser_version: "30.2.0",
   client_build_number: CLIENT_BUILD_NUMBER,
+  native_build_number: 55028,
   client_event_source: null,
 })).toString("base64");
 
@@ -195,18 +194,17 @@ function connectGateway() {
             capabilities: 16381,
             properties: {
               os: "Windows",
-              browser: "Chrome",
-              device: "",
-              system_locale: "fr-FR",
-              browser_user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-              browser_version: "125.0.0.0",
-              os_version: "10",
-              referrer: "",
-              referring_domain: "",
-              referrer_current: "",
-              referring_domain_current: "",
+              browser: "Discord Client",
               release_channel: "stable",
+              client_version: "1.0.9163",
+              os_version: "10.0.26100",
+              os_arch: "x64",
+              app_arch: "x64",
+              system_locale: "fr-FR",
+              browser_user_agent: UA,
+              browser_version: "30.2.0",
               client_build_number: CLIENT_BUILD_NUMBER,
+              native_build_number: 55028,
               client_event_source: null,
             },
             presence: {
